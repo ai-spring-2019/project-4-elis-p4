@@ -114,16 +114,15 @@ class NeuralNetwork():
 
 
     def create_params(self, layer_sizes):
-        """ Initializes matrix of weights and nodes
-        self.nodes - a dictionary, where the layer maps to a list of nodes
+        """ Initializes matrix of weights and biases
         self.weights - a dictionary where each layer j maps to a size ixj matrix"""
-        weights = {}
-        bias = {}
-        bias[0] = [1] * layer_sizes[0]
+        weights = [[None]]
+        bias = []
+        bias.append([1] * layer_sizes[0])
 
         for layer in range(1, len(layer_sizes)):
-            weights[layer] = numpy.random.rand(layer_sizes[layer-1], layer_sizes[layer])
-            bias[layer] = [1] * layer_sizes[layer]
+            weights.append(numpy.random.rand(layer_sizes[layer-1], layer_sizes[layer]))
+            bias.append([0] * layer_sizes[layer])
 
         bias[len(layer_sizes)-1] = [0] * layer_sizes[-1]
 
@@ -138,9 +137,10 @@ class NeuralNetwork():
         """ Takes a list of activation inputs, and takes the dot product
         with the list of weights. Returns """
         biases = self.bias[weight_layer]
+        weights = self.weights[weight_layer]
 
-        act_matrix = dot_product(act_matrix, self.weights[weight_layer])
-
+        #all node weights
+        act_matrix = [sum([weights[i][n]*act_matrix[i] for i in range(len(weights))]) for n in range(len(weights[0]))]
         return [act_matrix[i] + biases[i] for i in range(len(act_matrix))]
 
     def forward_propagate(self, input):
@@ -180,17 +180,20 @@ class NeuralNetwork():
     def update_weight(self, error_matrix, i, j):
         """ given a list of weights from a node to the next layer and errors
         from that next layer, updates the weights"""
-        error = error_matrix[i-1][j]
+        #weight i,j gets error of j
+        error = error_matrix[i]
         input = log_deriv(self.input_matrix[i-1][j])
-        self.bias[i-1][j] += ALPHA * input * error
-        self.weights[i][j] = [weight + ALPHA * input * error for weight in self.weights[i][j]]
+        self.bias[i-1][j] += ALPHA * input * error_matrix[i-1][j]
+        self.weights[i][j] = [weight + ALPHA * input * error[i] for i, weight in enumerate(self.weights[i][j])]
 
     def back_propogate(self, output, target):
         """back-propogation algorithm """
+        #print("back_propogate")
         error_matrix = []
 
         #difference between output and expected
         output_error = self.get_error(output, target)
+        #print(output_error)
 
         #the opposite of every input in the output
         log_deriv = logistic_derivative(self.input_matrix[len(self.dimens)-1])
@@ -199,25 +202,16 @@ class NeuralNetwork():
         #calculate errors for weights in output layer
         error_matrix = [[error * log_deriv[i] for i, error in enumerate(output_error)]]
 
-
-
         #calculate errors for rest of network
         for i in range(len(self.dimens)-1, 0, -1):
-            #print(i)
             error_matrix.insert(0, self.node_layer_error(error_matrix[0], i))
-
 
         #update every weight, self.weights is categorized differently against
         #other stored matrices, hence the +1
-        for i in range(1, len(self.weights)+1):
-
-            #for every weight in layer of weights
+        for i in range(1, len(self.weights)):
             for j in range(len(self.weights[i])):
+                #print(i,j,'here')
                 self.update_weight(error_matrix, i, j)
-
-
-
-
 
     def back_propagation_learning(self, training):
         for example in training:
@@ -225,13 +219,21 @@ class NeuralNetwork():
             output = self.forward_propagate(input)
             self.back_propogate(output, target)
 
+    def train(self, training, epochs, group):
+        """iteratively train a network"""
+        for epoch in range(epochs):
+            self.input_matrix={}
+            self.back_propagation_learning(training)
+            acc = accuracy(self, group)
+            print("Accuracy on epoch {} is {} ".format(epoch, acc))
+
 def test_3_bit(nn, training):
     """Test accuracy on a 3-bit incrementer"""
     accuracy = 0
     for example in training:
         input, target = example
         output =[round(num) for num in nn.forward_propagate(input)]
-        #print(input, target, output)
+        print(input, target, output)
         for i in range(len(output)):
             if output[i] == target[i]:
                 accuracy += 1
@@ -253,9 +255,32 @@ def test_three():
     nn = NeuralNetwork([3, 6, 3])
     training = convert_data_to_pairs(data, header)
     print(nn.forward_propagate([1,0,1]))
-    for epoch in range(0):
+    for epoch in range(5000):
         nn.back_propagation_learning(training)
+
     test_3_bit(nn, training)
+
+
+def k_fold_cross(nn, data, k):
+
+    random.shuffle(data)
+    #split into k random groups
+    groups = [data[i:i+k] for i in range(0, len(data), k)]
+    accuracy_results = []
+    for group in groups:
+        train = groups
+        train.remove(group)
+        training = [item for subgroup in train for item in subgroup]
+        nn = NeuralNetwork([2,2,1])
+        nn.train(training, 1000, group)
+        acc = accuracy(nn, group)
+        accuracy_results.append(acc)
+
+
+    return sum(accuracy_results)/len(groups)
+
+
+
 
 
 
@@ -265,24 +290,12 @@ def test_three():
 def main():
     header, data = read_data(sys.argv[1], ",")
 
-    paired_data = convert_data_to_pairs(data, header)
+    training = convert_data_to_pairs(data, header)
 
 
 
-    nn = NeuralNetwork([2, 3, 1])
-
-    f = open("data.csv", "a+")
-    test_three()
-    for epoch in range(10000):
-        nn.input_matrix={}
-        testing, training = hold_out_val(paired_data)
-        nn.back_propagation_learning(training)
-        acc = accuracy(nn, testing)
-        #f.write("{},{}".format(epoch,acc))
-        print("Accuracy on epoch {} is {} ".format(epoch, acc))
-
-    f.close()
-
+    nn = NeuralNetwork([2, 2, 1])
+    print(k_fold_cross(nn, training, 10))
 
 if __name__ == "__main__":
     main()
